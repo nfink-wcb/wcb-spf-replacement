@@ -112,7 +112,7 @@
     #stackBox { display: none; }
     #stackBox.show { display: block; }
     #stackSearch { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; margin: 8px 0; }
-    #stackList { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; }
+    #stackList { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; }
     .stackItem { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 9px 10px; text-align: left; background: white; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
     .stackItem:last-child { border-bottom: 0; }
     .stackItem:hover { background: rgba(17,24,39,0.04); }
@@ -122,9 +122,22 @@
     #selBox { display: none; }
     #selBox.show { display: block; }
 
+    #statsSection.collapsed { display: none; }
     @media (max-width: 1100px) {
-      #app { grid-template-columns: 1fr; }
+      html, body { height: auto; min-height: 100%; }
+      #app { height: auto; min-height: 100vh; grid-template-columns: 1fr; padding: 6px; gap: 6px; }
+      #mapWrap { height: 45vh; min-height: 350px; }
       #legend { width: 240px; }
+    }
+    @media (max-width: 768px) {
+      #mapWrap { min-height: 300px; }
+      #legend { left: 6px; bottom: 6px; width: 210px; max-height: 42%; overflow-y: auto; padding: 9px; }
+      #stackList { max-height: 160px; }
+      .stackItem { min-height: 44px; padding: 14px 12px; }
+      .stackId { font-size: 13px; }
+      .stackAddress { font-size: 12px; }
+      button { min-height: 44px; }
+      .grid3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -185,9 +198,12 @@
       </div>
 
       <div class="card" style="flex:1; overflow:auto;">
-        <div style="font-size:13px;font-weight:800;margin-bottom:10px;">Decision-maker totals</div>
-
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:800;">Decision-maker totals</div>
+          <button id="toggleStats" type="button">Hide statistics</button>
+        </div>
         <div id="totalsWrap" style="display:none;">
+          <div id="statsSection">
           <div class="grid2">
             <div class="tile">
               <div class="k">Current tax revenue</div>
@@ -241,6 +257,8 @@
               <div class="v small"><span id="minDelta" class="neg">$—</span> / <span id="maxDelta" class="pos">$—</span></div>
               <div class="k" style="margin-top:6px;">Parcels: ↑ <b id="incN">—</b> • ↓ <b id="decN">—</b> • ~ <b id="flatN">—</b></div>
             </div>
+          </div>
+
           </div>
 
           <div class="divider"></div>
@@ -355,6 +373,8 @@
 
   const totalsWrap = $("totalsWrap");
   const totalsEmpty = $("totalsEmpty");
+  const statsSection = $("statsSection");
+  const toggleStats = $("toggleStats");
 
   // totals outputs
   const out = {
@@ -862,6 +882,15 @@
     clearSelected();
   });
   stackSearch.addEventListener("input", renderStacked);
+  const setStatsCollapsed = (collapsed) => {
+    statsSection.classList.toggle("collapsed", collapsed);
+    toggleStats.textContent = collapsed ? "Show statistics" : "Hide statistics";
+    toggleStats.setAttribute("aria-expanded", String(!collapsed));
+  };
+  toggleStats.addEventListener("click", () => {
+    setStatsCollapsed(!statsSection.classList.contains("collapsed"));
+  });
+  setStatsCollapsed(window.matchMedia("(max-width: 768px)").matches);
 
   // --- Load GeoJSON ---
   const load = async () => {
