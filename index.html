@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tax vs SPF Replacement — Parcel Impact Map</title>
+
+  <!-- MapLibre GL -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: rgba(255,255,255,0.95);
+      --muted: rgba(17,24,39,0.55);
+      --border: rgba(17,24,39,0.10);
+      --shadow: 0 10px 30px rgba(0,0,0,0.15);
+      --radius: 18px;
+      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    }
+    html, body { height: 100%; margin: 0; font-family: var(--font); background: #f5f7fb; }
+    #app {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 12px;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+    #mapWrap {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      background: #111827;
+    }
+    #map { position: absolute; inset: 0; }
+    #legend {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      width: 270px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 12px;
+      backdrop-filter: blur(6px);
+    }
+    #legend h4 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #legend .row { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: center; margin: 4px 0; }
+    #legend .swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.08); }
+    #legend .lbl { font-size: 12px; color: #111827; }
+
+    #side {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      min-height: 0;
+    }
+    .title { font-size: 16px; font-weight: 700; margin: 0; }
+    .subtitle { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+
+    .controls { display: grid; gap: 10px; }
+    .controlRow { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 10px; align-items: center; }
+    input[type="range"] { width: 100%; }
+    input[type="number"] { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; }
+
+    .btnRow { display: flex; flex-wrap: wrap; gap: 8px; }
+    button {
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: white;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.primary { background: #111827; color: white; border-color: rgba(255,255,255,0.20); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .tile {
+      background: rgba(17,24,39,0.04);
+      border-radius: 16px;
+      padding: 10px;
+    }
+    .k { font-size: 12px; color: var(--muted); }
+    .v { font-size: 16px; font-weight: 700; margin-top: 4px; }
+    .v.small { font-size: 14px; }
+    .pos { color: #b91c1c; }
+    .neg { color: #1d4ed8; }
+
+    .divider { height: 1px; background: var(--border); margin: 10px 0; }
+
+    #status { font-size: 12px; color: var(--muted); }
+    #stackBox { display: none; }
+    #stackBox.show { display: block; }
+    #stackSearch { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; margin: 8px 0; }
+    #stackList { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; }
+    .stackItem { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 9px 10px; text-align: left; background: white; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+    .stackItem:last-child { border-bottom: 0; }
+    .stackItem:hover { background: rgba(17,24,39,0.04); }
+    .stackId { font-size: 12px; font-weight: 800; overflow-wrap: anywhere; }
+    .stackAddress { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+    .stackDelta { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 12px; font-weight: 800; }
+    #selBox { display: none; }
+    #selBox.show { display: block; }
+
+    @media (max-width: 1100px) {
+      #app { grid-template-columns: 1fr; }
+      #legend { width: 240px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="mapWrap">
+      <div id="map"></div>
+      <div id="legend">
+        <h4>
+          <span>Change in annual burden</span>
+          <span title="Blue = decrease, Red = increase (new tax-only minus current tax+SPF)" style="color: var(--muted); font-weight: 600;">?</span>
+        </h4>
+        <div id="legendRows"></div>
+        <div style="margin-top: 8px; font-size: 11px; color: var(--muted);">Click a parcel for details.</div>
+      </div>
+    </div>
+
+    <div id="side">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <div>
+            <p class="title">Tax vs current burden (Tax + SPF)</p>
+            <p class="subtitle">Tax-exempt parcel classes: <b>E</b> and <b>U</b>. Current millage assumed <b id="curMillageLbl">8.09</b> mills.</p>
+          </div>
+          <div style="font-size:12px;color:var(--muted);font-weight:700;background:rgba(17,24,39,0.04);padding:8px 10px;border-radius:999px;">
+            <span id="parcelCount">—</span> parcels
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="controls">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:13px;font-weight:700;">Scenario millage</div>
+            <div style="font-size:12px;font-weight:700;background:rgba(17,24,39,0.04);padding:6px 10px;border-radius:999px;">
+              <span id="millageBadge">8.09</span> mills
+            </div>
+          </div>
+
+          <div class="controlRow">
+            <input id="millageRange" type="range" min="0" max="30" step="0.01" value="8.09" />
+            <input id="millageNum" type="number" min="0" max="200" step="0.01" value="8.09" />
+          </div>
+
+          <div class="btnRow">
+            <button id="btnReset">Reset to current</button>
+            <button id="btnRevenueNeutral" class="primary" disabled>Set to SPF-replacement millage</button>
+            <button id="btnFit">Default Zoom</button>
+          </div>
+
+          <div id="revNeutralHint" style="font-size:12px;color:var(--muted);display:none;">
+            SPF-replacement (revenue-neutral): <b id="revNeutralVal">—</b> mills
+          </div>
+
+          <div id="status">Loading parcels…</div>
+        </div>
+      </div>
+
+      <div class="card" style="flex:1; overflow:auto;">
+        <div style="font-size:13px;font-weight:800;margin-bottom:10px;">Decision-maker totals</div>
+
+        <div id="totalsWrap" style="display:none;">
+          <div class="grid2">
+            <div class="tile">
+              <div class="k">Current tax revenue</div>
+              <div class="v" id="curTaxTot">$—</div>
+            </div>
+            <div class="tile">
+              <div class="k">Current SPF revenue</div>
+              <div class="v" id="curSpfTot">$—</div>
+            </div>
+            <div class="tile">
+              <div class="k">Current total revenue</div>
+              <div class="v" id="curAllTot">$—</div>
+            </div>
+            <div class="tile">
+              <div class="k">Projected tax revenue</div>
+              <div class="v" id="newTaxTot">$—</div>
+              <div class="k" style="margin-top:6px;">
+                Net vs current total: <b id="netRev" class="">$—</b>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="grid3">
+            <div class="tile">
+              <div class="k">Taxable parcels</div>
+              <div class="v" id="taxableN">—</div>
+            </div>
+            <div class="tile">
+              <div class="k">Exempt parcels</div>
+              <div class="v" id="exemptN">—</div>
+            </div>
+            <div class="tile">
+              <div class="k">Taxable assessed base</div>
+              <div class="v small" id="taxBase">$—</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div style="font-size:13px;font-weight:800;margin-bottom:10px;">Per-parcel impact</div>
+          <div class="grid2">
+            <div class="tile">
+              <div class="k">Median change</div>
+              <div class="v" id="medianDelta">$—</div>
+              <div class="k" style="margin-top:6px;">10th–90th: <b id="p10p90">$—</b></div>
+            </div>
+            <div class="tile">
+              <div class="k">Min / Max change</div>
+              <div class="v small"><span id="minDelta" class="neg">$—</span> / <span id="maxDelta" class="pos">$—</span></div>
+              <div class="k" style="margin-top:6px;">Parcels: ↑ <b id="incN">—</b> • ↓ <b id="decN">—</b> • ~ <b id="flatN">—</b></div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div id="stackBox">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <div>
+                <div style="font-size:13px;font-weight:800;">Parcels at selected location</div>
+                <div id="stackCount" class="k" style="margin-top:3px;"></div>
+              </div>
+              <button id="btnClearStack">Clear</button>
+            </div>
+            <input id="stackSearch" type="search" placeholder="Search parcel ID or address" autocomplete="off" />
+            <div id="stackList"></div>
+            <div class="divider"></div>
+          </div>
+          <div id="selBox">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div style="font-size:13px;font-weight:800;">Selected parcel</div>
+              <button id="btnClearSel">Clear</button>
+            </div>
+            <div class="tile" style="margin-top:10px;background:white;border:1px solid var(--border);">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <div style="font-size:12px;font-weight:800;background:rgba(17,24,39,0.04);padding:6px 10px;border-radius:999px;" id="selId">(unknown)</div>
+                <div style="font-size:12px;font-weight:800;border:1px solid var(--border);padding:6px 10px;border-radius:999px;" id="selClass">Class —</div>
+              </div>
+              <div id="selAddress" style="font-size:13px;margin-top:8px;color:#374151;display:none;"></div>
+              <div class="grid2" style="margin-top:10px;gap:10px;">
+                <div>
+                  <div class="k">Assessment</div>
+                  <div class="v small" id="selAssess">$—</div>
+                </div>
+                <div>
+                  <div class="k">Change</div>
+                  <div class="v small" id="selDelta">$—</div>
+                </div>
+                <div>
+                  <div class="k">Current tax</div>
+                  <div class="v small" id="selCurTax">$—</div>
+                </div>
+                <div>
+                  <div class="k">Current SPF</div>
+                  <div class="v small" id="selCurSpf">$—</div>
+                </div>
+                <div>
+                  <div class="k">New tax</div>
+                  <div class="v small" id="selNewTax">$—</div>
+                </div>
+                <div>
+                  <div class="k">Current total</div>
+                  <div class="v small" id="selCurTot">$—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="totalsEmpty" style="font-size:13px;color:var(--muted);">Load parcels to compute totals.</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // --- Config ---
+  const GEOJSON_URL = "https://west-chestergis.maps.arcgis.com/sharing/rest/content/items/ab7532b955b742d1a5f5171256a8a939/data";
+  const CURRENT_MILLAGE = 8.09; // mills
+  const TAX_EXEMPT = new Set(["E", "U"]);
+
+  // Basemap style (swap to your own)
+  const BASEMAP_STYLE = "https://tiles.versatiles.org/assets/styles/colorful/style.json";
+
+  // Map layer IDs
+  const SRC_ID  = "parcels-src";
+  const FILL_ID = "parcels-fill";
+  const LINE_ID = "parcels-line";
+
+  // Color stops for delta
+  const stops = [-2000, -1000, -500, -250, -1, 0, 1, 250, 500, 1000, 2000];
+  const colors = {
+    n2000: "#0b3c8a",
+    n1000: "#1f64b8",
+    n500:  "#3b82f6",
+    n250:  "#60a5fa",
+    n1:  "#93c5fd",
+    zero:  "#d1d5db",
+    p1:  "#fecaca",
+    p250:  "#fca5a5",
+    p500:  "#f87171",
+    p1000: "#ef4444",
+    p2000: "#dc2626",
+    pMore: "#991b1b"
+  };
+
+  // --- DOM refs ---
+  const $ = (id) => document.getElementById(id);
+
+  const elStatus = $("status");
+  const elParcelCount = $("parcelCount");
+  const elCurMillageLbl = $("curMillageLbl");
+
+  const elRange = $("millageRange");
+  const elNum   = $("millageNum");
+  const elBadge = $("millageBadge");
+
+  const btnReset = $("btnReset");
+  const btnRevNeutral = $("btnRevenueNeutral");
+  const btnFit = $("btnFit");
+
+  const elRevHint = $("revNeutralHint");
+  const elRevVal = $("revNeutralVal");
+
+  const totalsWrap = $("totalsWrap");
+  const totalsEmpty = $("totalsEmpty");
+
+  // totals outputs
+  const out = {
+    curTaxTot: $("curTaxTot"),
+    curSpfTot: $("curSpfTot"),
+    curAllTot: $("curAllTot"),
+    newTaxTot: $("newTaxTot"),
+    netRev: $("netRev"),
+    taxableN: $("taxableN"),
+    exemptN: $("exemptN"),
+    taxBase: $("taxBase"),
+    medianDelta: $("medianDelta"),
+    p10p90: $("p10p90"),
+    minDelta: $("minDelta"),
+    maxDelta: $("maxDelta"),
+    incN: $("incN"),
+    decN: $("decN"),
+    flatN: $("flatN"),
+  };
+
+  // selected parcel outputs
+  const stackBox = $("stackBox");
+  const stackCount = $("stackCount");
+  const stackSearch = $("stackSearch");
+  const stackList = $("stackList");
+  const btnClearStack = $("btnClearStack");
+  const selBox = $("selBox");
+  const btnClearSel = $("btnClearSel");
+  const sel = {
+    id: $("selId"),
+    address: $("selAddress"),
+    cls: $("selClass"),
+    assess: $("selAssess"),
+    delta: $("selDelta"),
+    curTax: $("selCurTax"),
+    curSpf: $("selCurSpf"),
+    newTax: $("selNewTax"),
+    curTot: $("selCurTot"),
+  };
+
+  elCurMillageLbl.textContent = CURRENT_MILLAGE.toFixed(2);
+
+  // --- Helpers ---
+  const asNum = (x) => {
+    if (x == null) return 0;
+    if (typeof x === "string") x = x.replace(/,/g, "");
+    const n = Number(x);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const money0 = (n) =>
+    (Number.isFinite(n) ? n : 0).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+  const num = (n, d=3) =>
+    (Number.isFinite(n) ? n : 0).toLocaleString(undefined, { maximumFractionDigits: d });
+
+  const getParcelId = (props={}) => {
+    const value = props.parcel_uid;
+    return value != null && String(value).trim() ? String(value) : "(unknown)";
+  };
+
+  const metricsFor = (props, millage) => {
+    const total_assessment = asNum(props.total_assessment);
+    const cur_spf = asNum(props.cur_spf);
+    const cur_tax = asNum(props.cur_tax);
+    const parcel_class = String(props.parcel_class ?? "").trim().toUpperCase();
+    const tax_exempt = TAX_EXEMPT.has(parcel_class);
+
+    const current_total = cur_tax + cur_spf;
+    const new_tax = tax_exempt ? 0 : (total_assessment * millage) / 1000;
+    const new_total = new_tax; // SPF removed
+    const delta = new_total - current_total;
+
+    return { total_assessment, cur_spf, cur_tax, parcel_class, tax_exempt, current_total, new_tax, new_total, delta };
+  };
+
+  const deltaClass = (d) => (d >= 0 ? "pos" : "neg");
+
+  const buildLegend = () => {
+    const legendRows = $("legendRows");
+    legendRows.innerHTML = "";
+
+    const ranges = [
+      { label: `≤ ${money0(stops[0])}`, value: stops[0] },
+      { label: `${money0(stops[0])} to ${money0(stops[1])}`, value: (stops[0]+stops[1])/2 },
+      { label: `${money0(stops[1])} to ${money0(stops[2])}`, value: (stops[1]+stops[2])/2 },
+      { label: `${money0(stops[2])} to ${money0(stops[3])}`, value: (stops[2]+stops[3])/2 },
+      { label: `${money0(stops[3])} to ${money0(stops[4])}`, value: (stops[3]+stops[4])/2 },
+      { label: `≈ ${money0(0)}`, value: 0 },
+      { label: `${money0(stops[6])} to ${money0(stops[7])}`, value: (stops[6]+stops[7])/2 },
+      { label: `${money0(stops[7])} to ${money0(stops[8])}`, value: (stops[7]+stops[8])/2 },
+      { label: `${money0(stops[8])} to ${money0(stops[9])}`, value: (stops[8]+stops[9])/2 },
+      { label: `${money0(stops[9])} to ${money0(stops[10])}`, value: (stops[9]+stops[10])/2 },
+      { label: `≥ ${money0(stops[10])}`, value: stops[10] },
+    ];
+
+    const colorForDelta = (d) => {
+      if (d <= -2000) return colors.n2000;
+      if (d <= -1000) return colors.n1000;
+      if (d <= -500)  return colors.n500;
+      if (d <= -250)  return colors.n250;
+      if (d <= -1)  return colors.n1;
+      if (d < 0)      return "#bfdbfe";
+      if (d === 0)    return colors.zero;
+      if (d <= 1)   return colors.p1;
+      if (d <= 250)   return colors.p250;
+      if (d <= 500)   return colors.p500;
+      if (d <= 1000)  return colors.p1000;
+      if (d <= 2000)  return colors.p2000;
+      return colors.pMore;
+    };
+
+    for (const r of ranges) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const sw = document.createElement("div");
+      sw.className = "swatch";
+      sw.style.background = colorForDelta(r.value);
+      const lbl = document.createElement("div");
+      lbl.className = "lbl";
+      lbl.textContent = r.label;
+      row.appendChild(sw);
+      row.appendChild(lbl);
+      legendRows.appendChild(row);
+    }
+  };
+
+  buildLegend();
+
+  // --- Map init ---
+  const map = new maplibregl.Map({
+    container: "map",
+    style: BASEMAP_STYLE,
+    center: [-75.605, 39.96],
+    zoom: 14
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: true }), "top-right");
+
+  let geojson = null;
+  let requiredMillage = null;
+  let selectedProps = null;
+  let stackedProps = [];
+
+  const fitToGeojson = () => {
+    if (!geojson?.features?.length) return;
+
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    const scan = (coords) => {
+      if (!coords) return;
+      if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+        const [x,y] = coords;
+        if (x<minX) minX=x; if (y<minY) minY=y; if (x>maxX) maxX=x; if (y>maxY) maxY=y;
+        return;
+      }
+      for (const c of coords) scan(c);
+    };
+    for (const f of geojson.features) scan(f?.geometry?.coordinates);
+    if (Number.isFinite(minX)) {
+      map.fitBounds([[minX,minY],[maxX,maxY]], { padding: 24, duration: 600 });
+    }
+  };
+
+  // --- Source + layers ---
+  const ensureLayers = () => {
+    if (!map.getSource(SRC_ID)) {
+      map.addSource(SRC_ID, { type: "geojson", data: geojson });
+
+      map.addLayer({
+        id: FILL_ID,
+        type: "fill",
+        source: SRC_ID,
+        paint: {
+          "fill-color": [
+            "step",
+            ["coalesce", ["feature-state", "delta"], 0],
+            colors.n2000,
+            stops[0], colors.n1000,
+            stops[1], colors.n500,
+            stops[2], colors.n250,
+            stops[3], colors.n1,
+            stops[4], "#bfdbfe",
+            stops[5], colors.zero,
+            stops[6], colors.p1,
+            stops[7], colors.p250,
+            stops[8], colors.p500,
+            stops[9], colors.p1000,
+            stops[10], colors.pMore
+          ],
+          "fill-opacity": 0.75
+        }
+      });
+
+      map.addLayer({
+        id: LINE_ID,
+        type: "line",
+        source: SRC_ID,
+        paint: { "line-color": "#111827", "line-width": 0.4, "line-opacity": 0.4 }
+      });
+
+      map.on("mouseenter", FILL_ID, () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", FILL_ID, () => (map.getCanvas().style.cursor = ""));
+
+      map.on("click", FILL_ID, (e) => {
+        const rendered = map.queryRenderedFeatures(e.point, { layers: [FILL_ID] });
+        const unique = [];
+        const seen = new Set();
+
+        for (const feat of rendered) {
+          const props = feat.properties || {};
+          const key = getParcelId(props);
+          if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(props);
+          }
+        }
+
+        if (!unique.length) return;
+
+        if (unique.length === 1) {
+          clearStacked();
+          selectedProps = unique[0];
+          showSelected(selectedProps, getMillage());
+        } else {
+          selectedProps = null;
+          selBox.classList.remove("show");
+          selBox.style.display = "none";
+          stackedProps = unique;
+          stackSearch.value = "";
+          renderStacked();
+        }
+      });
+    } else {
+      map.getSource(SRC_ID).setData(geojson);
+    }
+  };
+
+  const showPopup = (lngLat, props, millage) => {
+    const m = metricsFor(props, millage);
+    const id = getParcelId(props);
+    const address = String(props.situs_addr1 ?? "").trim();
+
+    const html = `
+      <div style="font-family:${getComputedStyle(document.body).fontFamily};font-size:12px;">
+        <div style="font-weight:800;margin-bottom:${address ? "2px" : "6px"};">Parcel ${id}</div>
+        ${address ? `<div style="margin-bottom:6px;color:#374151;"><b>Address</b>: ${address}</div>` : ""}
+        <div><b>Class</b>: ${m.parcel_class || "(blank)"} ${m.tax_exempt ? "(tax-exempt)" : ""}</div>
+        <div><b>Total assessment</b>: ${money0(m.total_assessment)}</div>
+        <hr style="margin:8px 0;" />
+        <div><b>Current tax</b>: ${money0(m.cur_tax)}</div>
+        <div><b>Current SPF</b>: ${money0(m.cur_spf)}</div>
+        <div><b>Current total</b>: ${money0(m.current_total)}</div>
+        <hr style="margin:8px 0;" />
+        <div><b>Scenario millage</b>: ${num(millage,3)} mills</div>
+        <div><b>New tax</b>: ${money0(m.new_tax)}</div>
+        <div><b>New total</b>: ${money0(m.new_total)}</div>
+        <div style="margin-top:6px;"><b>Change</b>:
+          <span style="color:${m.delta>=0 ? "#b91c1c" : "#1d4ed8"};font-weight:800;">
+            ${money0(m.delta)}
+          </span>
+        </div>
+      </div>
+    `;
+    new maplibregl.Popup({ closeButton: true, closeOnClick: true })
+      .setLngLat(lngLat)
+      .setHTML(html)
+      .addTo(map);
+  };
+
+  // --- Feature-state update (for coloring) ---
+  const setFeatureStates = (millage) => {
+    if (!geojson?.features?.length) return;
+
+    // chunk updates to keep UI responsive
+    const feats = geojson.features;
+    let i = 0;
+    const step = () => {
+      const t0 = performance.now();
+      while (i < feats.length && performance.now() - t0 < 12) {
+        const f = feats[i];
+        const props = f.properties || {};
+        const m = metricsFor(props, millage);
+        try {
+          map.setFeatureState({ source: SRC_ID, id: f.id }, { delta: m.delta });
+        } catch (err) {
+          // ignore
+        }
+        i++;
+      }
+      if (i < feats.length) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+
+  // --- Stats computation + UI update ---
+  const computeAndRender = (millage) => {
+    if (!geojson?.features?.length) return;
+
+    let n=0, taxableN=0, exemptN=0;
+    let currentTaxTotal=0, currentSpfTotal=0, currentAllTotal=0;
+    let taxableAssessedTotal=0, newTaxTotal=0;
+
+    let inc=0, dec=0, flat=0;
+    const deltas = [];
+
+    for (const f of geojson.features) {
+      n++;
+      const m = metricsFor(f.properties || {}, millage);
+
+      currentTaxTotal += m.cur_tax;
+      currentSpfTotal += m.cur_spf;
+      currentAllTotal += m.current_total;
+      newTaxTotal     += m.new_tax;
+
+      if (m.tax_exempt) exemptN++;
+      else { taxableN++; taxableAssessedTotal += m.total_assessment; }
+
+      if (m.delta > 0.5) inc++;
+      else if (m.delta < -0.5) dec++;
+      else flat++;
+
+      deltas.push(m.delta);
+    }
+
+    deltas.sort((a,b)=>a-b);
+    const pick = (p) => deltas.length ? deltas[Math.min(deltas.length-1, Math.floor(deltas.length*p))] : 0;
+    const median = deltas.length ? deltas[Math.floor(deltas.length/2)] : 0;
+    const p10 = pick(0.10);
+    const p90 = pick(0.90);
+    const min = deltas.length ? deltas[0] : 0;
+    const max = deltas.length ? deltas[deltas.length-1] : 0;
+
+    const currentTotalRevenue = currentTaxTotal + currentSpfTotal;
+    requiredMillage = 9.11;
+    const netRevenueChange = newTaxTotal - currentTotalRevenue;
+
+    // render totals
+    totalsEmpty.style.display = "none";
+    totalsWrap.style.display = "block";
+
+    out.curTaxTot.textContent = money0(currentTaxTotal);
+    out.curSpfTot.textContent = money0(currentSpfTotal);
+    out.curAllTot.textContent = money0(currentTotalRevenue);
+    out.newTaxTot.textContent = money0(newTaxTotal);
+
+    out.netRev.textContent = money0(netRevenueChange);
+    out.netRev.className = netRevenueChange >= 0 ? "pos" : "neg";
+
+    out.taxableN.textContent = taxableN.toLocaleString();
+    out.exemptN.textContent = exemptN.toLocaleString();
+    out.taxBase.textContent  = money0(taxableAssessedTotal);
+
+    out.medianDelta.textContent = money0(median);
+    out.medianDelta.className = "v " + (median >= 0 ? "pos" : "neg");
+
+    out.p10p90.textContent = `${money0(p10)} to ${money0(p90)}`;
+    out.minDelta.textContent = money0(min);
+    out.maxDelta.textContent = money0(max);
+
+    out.incN.textContent = inc.toLocaleString();
+    out.decN.textContent = dec.toLocaleString();
+    out.flatN.textContent = flat.toLocaleString();
+
+    // revenue-neutral UI
+    if (requiredMillage != null && Number.isFinite(requiredMillage)) {
+      btnRevNeutral.disabled = false;
+      elRevHint.style.display = "block";
+      elRevVal.textContent = num(requiredMillage, 3);
+    } else {
+      btnRevNeutral.disabled = true;
+      elRevHint.style.display = "none";
+    }
+
+    // update selected panel if needed
+    if (selectedProps) showSelected(selectedProps, millage);
+    if (stackedProps.length) renderStacked();
+  };
+
+  const renderStacked = () => {
+    const query = stackSearch.value.trim().toLowerCase();
+    const millage = getMillage();
+    const matches = stackedProps
+      .filter(props => {
+        const id = getParcelId(props).toLowerCase();
+        const address = String(props.situs_addr1 ?? "").toLowerCase();
+        return !query || id.includes(query) || address.includes(query);
+      })
+      .sort((a, b) => {
+        const addressA = String(a.situs_addr1 ?? "");
+        const addressB = String(b.situs_addr1 ?? "");
+        return addressA.localeCompare(addressB, undefined, { numeric: true }) ||
+          getParcelId(a).localeCompare(getParcelId(b), undefined, { numeric: true });
+      });
+
+    stackBox.classList.add("show");
+    stackBox.style.display = "block";
+    stackCount.textContent = `${stackedProps.length.toLocaleString()} parcels found`;
+    stackList.innerHTML = "";
+
+    for (const props of matches) {
+      const id = getParcelId(props);
+      const address = String(props.situs_addr1 ?? "").trim() || "No address";
+      const m = metricsFor(props, millage);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "stackItem";
+
+      const idEl = document.createElement("span");
+      idEl.className = "stackId";
+      idEl.textContent = id;
+
+      const addressEl = document.createElement("span");
+      addressEl.className = "stackAddress";
+      addressEl.textContent = address;
+
+      const deltaEl = document.createElement("span");
+      deltaEl.className = `stackDelta ${deltaClass(m.delta)}`;
+      deltaEl.textContent = money0(m.delta);
+
+      button.append(idEl, addressEl, deltaEl);
+      button.addEventListener("click", () => {
+        selectedProps = props;
+        showSelected(selectedProps, getMillage());
+      });
+      stackList.appendChild(button);
+    }
+
+    if (!matches.length) {
+      const empty = document.createElement("div");
+      empty.className = "k";
+      empty.style.padding = "12px";
+      empty.textContent = "No matching parcels.";
+      stackList.appendChild(empty);
+    }
+  };
+
+  const clearStacked = () => {
+    stackedProps = [];
+    stackSearch.value = "";
+    stackList.innerHTML = "";
+    stackBox.classList.remove("show");
+    stackBox.style.display = "none";
+  };
+
+  const showSelected = (props, millage) => {
+    const m = metricsFor(props, millage);
+    const id = getParcelId(props);
+    const address = String(props.situs_addr1 ?? "").trim();
+
+    selBox.classList.add("show");
+    selBox.style.display = "block";
+
+    sel.id.textContent = id;
+    sel.address.textContent = address;
+    sel.address.style.display = address ? "block" : "none";
+    sel.cls.textContent = `Class ${m.parcel_class || "(blank)"}${m.tax_exempt ? " • tax-exempt" : ""}`;
+    sel.assess.textContent = money0(m.total_assessment);
+
+    sel.delta.textContent = money0(m.delta);
+    sel.delta.className = "v small " + deltaClass(m.delta);
+
+    sel.curTax.textContent = money0(m.cur_tax);
+    sel.curSpf.textContent = money0(m.cur_spf);
+    sel.newTax.textContent = money0(m.new_tax);
+    sel.curTot.textContent = money0(m.current_total);
+  };
+
+  const clearSelected = () => {
+    selectedProps = null;
+    selBox.classList.remove("show");
+    selBox.style.display = "none";
+  };
+
+  // --- Millage input wiring ---
+  const setMillage = (v) => {
+    const val = Math.max(0, Math.min(200, Number(v)));
+    if (!Number.isFinite(val)) return;
+
+    elRange.value = String(Math.min(30, val)); // range max is 30
+    elNum.value = String(val);
+    elBadge.textContent = num(val, 3);
+
+    // recompute
+    if (geojson) {
+      computeAndRender(val);
+      setFeatureStates(val);
+    }
+  };
+
+  const getMillage = () => {
+    const v = Number(elNum.value);
+    return Number.isFinite(v) ? v : CURRENT_MILLAGE;
+  };
+
+  elRange.addEventListener("input", () => setMillage(elRange.value));
+  elNum.addEventListener("change", () => setMillage(elNum.value));
+
+  btnReset.addEventListener("click", () => setMillage(CURRENT_MILLAGE));
+  btnRevNeutral.addEventListener("click", () => {
+    if (requiredMillage != null && Number.isFinite(requiredMillage)) setMillage(Number(requiredMillage.toFixed(3)));
+  });
+  btnFit.addEventListener("click", fitToGeojson);
+  btnClearSel.addEventListener("click", clearSelected);
+  btnClearStack.addEventListener("click", () => {
+    clearStacked();
+    clearSelected();
+  });
+  stackSearch.addEventListener("input", renderStacked);
+
+  // --- Load GeoJSON ---
+  const load = async () => {
+    try {
+      elStatus.textContent = "Loading parcels…";
+      const res = await fetch(GEOJSON_URL);
+      if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
+      geojson = await res.json();
+
+      // Ensure each feature has a stable id for feature-state updates
+      if (geojson?.features?.length) {
+        geojson.features.forEach((f, idx) => {
+          const p = f.properties || {};
+          const fid = p.OBJECTID ?? p.objectid ?? p.OID ?? p.oid ?? idx;
+          f.id = fid;
+        });
+      }
+
+      elParcelCount.textContent = (geojson.features?.length || 0).toLocaleString();
+      elStatus.textContent = "Loaded. Adjust millage to test scenarios.";
+
+      // add layers once map is ready
+      if (map.isStyleLoaded()) {
+        ensureLayers();
+        fitToGeojson();
+        setMillage(CURRENT_MILLAGE);
+      } else {
+        map.once("load", () => {
+          ensureLayers();
+          fitToGeojson();
+          setMillage(CURRENT_MILLAGE);
+        });
+      }
+    } catch (err) {
+      elStatus.textContent = "Couldn’t load GeoJSON. If this is CORS, host a local copy or proxy it.";
+      console.error(err);
+    }
+  };
+
+  load();
+})();
+</script>
+</body>
+</html>
