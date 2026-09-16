@@ -738,7 +738,7 @@
     const matches = stackedProps
       .filter(props => {
         const id = getParcelId(props).toLowerCase();
-        const address = String(props.situs_addr1 ?? "").toLowerCase();
+        const address = getAddress(props).toLowerCase();
         return !query || id.includes(query) || address.includes(query);
       })
       .sort((a, b) => {
@@ -755,7 +755,7 @@
 
     for (const props of matches) {
       const id = getParcelId(props);
-      const address = String(props.situs_addr1 ?? "").trim() || "No address";
+      const address = getAddress(props).trim() || "No address";
       const m = metricsFor(props, millage);
       const button = document.createElement("button");
       button.type = "button";
@@ -801,7 +801,7 @@
   const showSelected = (props, millage) => {
     const m = metricsFor(props, millage);
     const id = getParcelId(props);
-    const address = String(props.situs_addr1 ?? "").trim();
+    const address = getAddress(props);;
 
     selBox.classList.add("show");
     selBox.style.display = "block";
@@ -900,6 +900,12 @@
       console.error(err);
     }
   };
+
+ const getAddress = (props = {}) =>
+  [props.situs_addr1, props.situs_addr2]
+    .map(value => String(value ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
 
   load();
 })();
